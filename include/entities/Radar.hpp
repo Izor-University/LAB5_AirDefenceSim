@@ -4,10 +4,12 @@
 #include <vector>
 #include <string>
 
-enum class RadarMode {
-    SCANNING, // Поиск (секторное сканирование)
-    TRACKING  // Автосопровождение захваченной цели
+struct RadarTrack {
+    Vector3D Position;
+    double RadialVelocity;
 };
+
+enum class RadarMode { SCANNING, TRACKING };
 
 class Radar {
 private:
@@ -15,23 +17,26 @@ private:
     Vector3D Position;
     double CarrierFrequency;
 
-    // Параметры сектора сканирования
     double MinAzimuth;
     double MaxAzimuth;
-    int SweepDirection; // Направление вращения (1 или -1)
+    int SweepDirection;
 
     double CurrentAzimuth;
     double RotationSpeed;
     double BeamWidth;
     double MaxRange;
 
-    // Автосопровождение
     RadarMode Mode;
     Vector3D LockedTargetPos;
-    int TrackLossCounter; // Таймер потери цели (чтобы вернуться к сканированию)
+    int TrackLossCounter;
+
+    double SmoothedVelocity;
 
     std::vector<ComplexWave> ReceivedEchoes;
-    std::vector<Vector3D> DetectedTargets;
+    std::vector<RadarTrack> DetectedTargets;
+
+    // ДОБАВЛЕНО: Сохраняем локальные цели, которые видит именно этот радар
+    std::vector<RadarTrack> LastTracks;
 
 public:
     Radar(std::string Id, Vector3D Position, double CarrierFrequency);
@@ -40,8 +45,11 @@ public:
     Vector3D GetPosition() const;
     double GetMaxRange() const;
     RadarMode GetMode() const;
+    double GetAzimuth() const;
 
-    // Установка сектора обзора (в градусах)
+    // ДОБАВЛЕНО: Геттер для индивидуального дисплея
+    const std::vector<RadarTrack>& GetLastTracks() const { return LastTracks; }
+
     void SetSector(double MinDeg, double MaxDeg);
     void SetRotationSpeed(double Speed);
 
@@ -49,5 +57,5 @@ public:
 
     std::vector<ComplexWave> GenerateScanRays(int RayCount) const;
     void ReceiveEcho(const ComplexWave& Echo);
-    std::vector<Vector3D> ProcessEchoesAndDetect();
+    std::vector<RadarTrack> ProcessEchoesAndDetect();
 };

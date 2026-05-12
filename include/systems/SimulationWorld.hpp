@@ -2,6 +2,7 @@
 #include <vector>
 #include <memory>
 #include <optional>
+#include <algorithm> // Для std::remove_if
 
 #include "../physics/IPhysicalObject.hpp"
 #include "../entities/Radar.hpp"
@@ -25,7 +26,7 @@ private:
     int MaxBounces;
 
     std::vector<RaySegment> DebugRays;
-    std::vector<Vector3D> NetworkTracks; // ДОБАВЛЕНО: Хранилище треков сети ПВО
+    std::vector<RadarTrack> NetworkTracks;
 
     std::optional<NearestHit> FindNearestIntersection(const ComplexWave& Wave) const;
 
@@ -37,9 +38,10 @@ public:
 
     const std::vector<RaySegment>& GetDebugRays() const { return DebugRays; }
     void ClearDebugRays() { DebugRays.clear(); }
+    const std::vector<RadarTrack>& GetTracks() const { return NetworkTracks; }
 
-    // ДОБАВЛЕНО: Геттер для получения треков
-    const std::vector<Vector3D>& GetTracks() const { return NetworkTracks; }
+    // ДОБАВЛЕНО: Метод удаления всех ракет
+    void ClearTargets();
 
     void UpdatePhysics(double DeltaTime);
     void ProcessRadarNetwork(const std::vector<Vector3D>& ScanDirections);

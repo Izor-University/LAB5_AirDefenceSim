@@ -1,20 +1,23 @@
-#include <cmath>
 #include "../../include/systems/SimulationWorld.hpp"
 #include "../../include/physics/WaveEngine.hpp"
 
 SimulationWorld::SimulationWorld(int MaxBounces) : MaxBounces(MaxBounces) {}
 
-void SimulationWorld::AddObject(std::shared_ptr<IPhysicalObject> Obj) {
-    SpaceObjects.push_back(Obj);
-}
-
-void SimulationWorld::AddRadar(std::shared_ptr<Radar> Rdr) {
-    Radars.push_back(Rdr);
-}
+void SimulationWorld::AddObject(std::shared_ptr<IPhysicalObject> Obj) { SpaceObjects.push_back(Obj); }
+void SimulationWorld::AddRadar(std::shared_ptr<Radar> Rdr) { Radars.push_back(Rdr); }
 
 void SimulationWorld::UpdatePhysics(double DeltaTime) {
-    for (auto& Obj : SpaceObjects) {
-        Obj->UpdatePhysics(DeltaTime);
+    for (auto& Obj : SpaceObjects) Obj->UpdatePhysics(DeltaTime);
+}
+
+void SimulationWorld::ClearTargets() {
+    auto it = SpaceObjects.begin();
+    while (it != SpaceObjects.end()) {
+        if ((*it)->GetName().find("Target") != std::string::npos) {
+            it = SpaceObjects.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 
@@ -31,14 +34,12 @@ std::optional<NearestHit> SimulationWorld::FindNearestIntersection(const Complex
     return Nearest;
 }
 
-void SimulationWorld::ProcessRadarNetwork(const std::vector<Vector3D>& /*ScanDirections - больше не нужно*/) {
+void SimulationWorld::ProcessRadarNetwork(const std::vector<Vector3D>& /*ScanDirections*/) {
     DebugRays.clear();
-    std::vector<Vector3D> GlobalTracks; // Все цели, обнаруженные сетью ПВО
+    std::vector<RadarTrack> GlobalTracks;
 
     for (const auto& CurrentRadar : Radars) {
-        // Радар сам знает, куда он сейчас повернут
-        auto ActiveWaves = CurrentRadar->GenerateScanRays(20); // 5 лучей на сектор
-
+        auto ActiveWaves = CurrentRadar->GenerateScanRays(60);
         std::vector<ComplexWave> SuccessfulEchoes;
 
         for (auto& CurrentWave : ActiveWaves) {
@@ -47,7 +48,6 @@ void SimulationWorld::ProcessRadarNetwork(const std::vector<Vector3D>& /*ScanDir
                 auto Nearest = FindNearestIntersection(CurrentWave);
                 if (!Nearest.has_value()) {
                     if (BounceCount == 0) {
-                        // Рисуем луч радара до MaxRange
                         Vector3D EndPoint = CurrentWave.Position + (CurrentWave.Direction * CurrentRadar->GetMaxRange());
                         DebugRays.push_back({CurrentWave.Position, EndPoint, false});
                     }
@@ -58,30 +58,36 @@ void SimulationWorld::ProcessRadarNetwork(const std::vector<Vector3D>& /*ScanDir
 
                 try {
                     ComplexWave ReflectedWave = WaveEngine::CalculateReflection(CurrentWave, Nearest->Record, *Nearest->Object);
-                    Vector3D DirToRadar = (CurrentRadar->GetPosition() - ReflectedWave.Position).Normalize();
-                    ComplexWave EchoWave = ReflectedWave;
-                    EchoWave.Direction = DirToRadar;
 
-                    auto BlockCheck = FindNearestIntersection(EchoWave);
-                    if (!BlockCheck.has_value() || BlockCheck->Distance >= (CurrentRadar->GetPosition() - EchoWave.Position).Length()) {
-                        SuccessfulEchoes.push_back(EchoWave);
+                    if (Nearest->Object->GetName() != "Ground") {
+                        Vector3D DirToRadar = (CurrentRadar->GetPosition() - ReflectedWave.Position).Normalize();
+
+                        // ЧЕСТНАЯ ФИЗИКА: Пересчитываем Доплеровский сдвиг для прямого пути "Цель -> Радар"
+                        Vector3D Velocity = Nearest->Object->GetVelocity();
+                        double V_in = Velocity.DotProduct(CurrentWave.Direction); // Скорость сближения
+                        double V_out = Velocity.DotProduct(DirToRadar);           // Скорость возврата
+                        double TrueDopplerShift = 1.0 - ((V_in - V_out) / WaveEngine::SpeedOfLight);
+
+                        ComplexWave EchoWave = ReflectedWave;
+                        EchoWave.Direction = DirToRadar;
+                        EchoWave.Frequency = CurrentWave.Frequency * TrueDopplerShift; // Настоящая частота возврата!
+
+                        auto BlockCheck = FindNearestIntersection(EchoWave);
+                        if (!BlockCheck.has_value() || BlockCheck->Distance >= (CurrentRadar->GetPosition() - EchoWave.Position).Length()) {
+                            SuccessfulEchoes.push_back(EchoWave);
+                        }
                     }
+
                     CurrentWave = ReflectedWave;
                     BounceCount++;
                 } catch (const PhysicsException& e) { break; }
             }
         }
 
-        // Передаем эхо в радар и получаем обнаруженные координаты
-        for (const auto& Echo : SuccessfulEchoes) {
-            CurrentRadar->ReceiveEcho(Echo);
-        }
+        for (const auto& Echo : SuccessfulEchoes) CurrentRadar->ReceiveEcho(Echo);
 
-        // Data Fusion: собираем треки со всех радаров
         auto LocalTracks = CurrentRadar->ProcessEchoesAndDetect();
         GlobalTracks.insert(GlobalTracks.end(), LocalTracks.begin(), LocalTracks.end());
     }
-
-    // Сохраняем объединенные треки в публичном поле (нужно добавить его в .hpp)
     NetworkTracks = GlobalTracks;
 }
