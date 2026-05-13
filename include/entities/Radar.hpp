@@ -34,8 +34,6 @@ private:
 
     std::vector<ComplexWave> ReceivedEchoes;
     std::vector<RadarTrack> DetectedTargets;
-
-    // ДОБАВЛЕНО: Сохраняем локальные цели, которые видит именно этот радар
     std::vector<RadarTrack> LastTracks;
 
 public:
@@ -46,15 +44,21 @@ public:
     double GetMaxRange() const;
     RadarMode GetMode() const;
     double GetAzimuth() const;
-
-    // ДОБАВЛЕНО: Геттер для индивидуального дисплея
     const std::vector<RadarTrack>& GetLastTracks() const { return LastTracks; }
 
     void SetSector(double MinDeg, double MaxDeg);
     void SetRotationSpeed(double Speed);
 
-    void UpdatePhysics(double DeltaTime);
+    // ДОБАВЛЕНО: Очистка памяти радара
+    void ClearTracks() {
+        LastTracks.clear();
+        DetectedTargets.clear();
+        Mode = RadarMode::SCANNING;
+        TrackLossCounter = 0;
+        SmoothedVelocity = 0.0;
+    }
 
+    void UpdatePhysics(double DeltaTime);
     std::vector<ComplexWave> GenerateScanRays(int RayCount) const;
     void ReceiveEcho(const ComplexWave& Echo);
     std::vector<RadarTrack> ProcessEchoesAndDetect();

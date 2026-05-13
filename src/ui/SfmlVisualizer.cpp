@@ -1,6 +1,5 @@
 #include "../../include/ui/SfmlVisualizer.hpp"
 
-// ИСПРАВЛЕНО: используем RenderTarget
 SfmlVisualizer::SfmlVisualizer(sf::RenderTarget& target, float Scale)
     : RenderTarget(target), Scale(Scale),
       CameraOffset(RenderTarget.getSize().x / 2.0f, RenderTarget.getSize().y / 2.0f) {}
@@ -18,9 +17,9 @@ Vector3D SfmlVisualizer::ScreenToWorld(const sf::Vector2f& ScreenPos) const {
 void SfmlVisualizer::Render(const std::vector<std::shared_ptr<IPhysicalObject>>& Objects,
                             const std::vector<std::shared_ptr<Radar>>& Radars,
                             const std::vector<RaySegment>& Rays,
-                            const std::vector<RadarTrack>& Tracks)
+                            const std::vector<FusedTrack>& Tracks,
+                            int SelectedTrackId)
 {
-    // Отрисовка лучей
     for (const auto& Ray : Rays) {
         sf::VertexArray Line(sf::Lines, 2);
         Line[0].position = WorldToScreen(Ray.Start);
@@ -30,7 +29,6 @@ void SfmlVisualizer::Render(const std::vector<std::shared_ptr<IPhysicalObject>>&
         RenderTarget.draw(Line);
     }
 
-    // Отрисовка Земли и Целей
     for (const auto& Obj : Objects) {
         if (auto Ground = std::dynamic_pointer_cast<Obstacle>(Obj)) {
             sf::RectangleShape GroundRect(sf::Vector2f(RenderTarget.getSize().x, 500.0f));
@@ -38,7 +36,7 @@ void SfmlVisualizer::Render(const std::vector<std::shared_ptr<IPhysicalObject>>&
             GroundRect.setPosition(0, WorldToScreen(Ground->GetPosition()).y);
             RenderTarget.draw(GroundRect);
         }
-        else if (auto Tgt = std::dynamic_pointer_cast<Target>(Obj)) { // Теперь компилятор поймет, что Target - это класс!
+        else if (auto Tgt = std::dynamic_pointer_cast<Target>(Obj)) {
             sf::CircleShape TargetShape(4.0f);
             TargetShape.setFillColor(sf::Color::Red);
             TargetShape.setOrigin(4.0f, 4.0f);
@@ -47,7 +45,6 @@ void SfmlVisualizer::Render(const std::vector<std::shared_ptr<IPhysicalObject>>&
         }
     }
 
-    // Отрисовка радаров
     for (const auto& Rdr : Radars) {
         sf::CircleShape RadarShape(8.0f);
         RadarShape.setFillColor(sf::Color(0, 255, 100));
@@ -56,13 +53,24 @@ void SfmlVisualizer::Render(const std::vector<std::shared_ptr<IPhysicalObject>>&
         RenderTarget.draw(RadarShape);
     }
 
-    // Отрисовка захваченных треков (желтые рамки)
+    // ИЗМЕНЕНО: Отрисовка объединенных треков и выделение цели
     for (const auto& Track : Tracks) {
-        sf::RectangleShape TrackerMarker(sf::Vector2f(16.0f, 16.0f));
+        sf::RectangleShape TrackerMarker;
+
+        if (Track.Id == SelectedTrackId) {
+            // Цель захвачена для ракеты (Красный прицел)
+            TrackerMarker.setSize(sf::Vector2f(26.0f, 26.0f));
+            TrackerMarker.setOutlineColor(sf::Color::Red);
+            TrackerMarker.setOrigin(13.0f, 13.0f);
+        } else {
+            // Обычная цель в сети (Желтая)
+            TrackerMarker.setSize(sf::Vector2f(16.0f, 16.0f));
+            TrackerMarker.setOutlineColor(sf::Color::Yellow);
+            TrackerMarker.setOrigin(8.0f, 8.0f);
+        }
+
         TrackerMarker.setFillColor(sf::Color::Transparent);
         TrackerMarker.setOutlineThickness(2.0f);
-        TrackerMarker.setOutlineColor(sf::Color::Yellow);
-        TrackerMarker.setOrigin(8.0f, 8.0f);
         TrackerMarker.setPosition(WorldToScreen(Track.Position));
         RenderTarget.draw(TrackerMarker);
     }

@@ -11,7 +11,7 @@
 
 class SfmlVisualizer {
 private:
-    sf::RenderTarget& RenderTarget; // ИСПРАВЛЕНО: переименовали переменную, чтобы не было конфликта
+    sf::RenderTarget& RenderTarget;
     float Scale;
     sf::Vector2f CameraOffset;
 
@@ -24,5 +24,6 @@ public:
     void Render(const std::vector<std::shared_ptr<IPhysicalObject>>& Objects,
                 const std::vector<std::shared_ptr<Radar>>& Radars,
                 const std::vector<RaySegment>& Rays,
-                const std::vector<RadarTrack>& Tracks);
+                const std::vector<FusedTrack>& Tracks,   // ИЗМЕНЕНО
+                int SelectedTrackId);                    // ДОБАВЛЕНО
 };

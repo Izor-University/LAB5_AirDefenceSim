@@ -4,7 +4,7 @@
 Radar::Radar(std::string Id, Vector3D Position, double CarrierFrequency)
     : Id(Id), Position(Position), CarrierFrequency(CarrierFrequency),
       SweepDirection(1), RotationSpeed(2.0), BeamWidth(0.15), MaxRange(25000.0),
-      Mode(RadarMode::SCANNING), TrackLossCounter(0)
+      Mode(RadarMode::SCANNING), TrackLossCounter(0), SmoothedVelocity(0.0)
 {
     SetSector(0, 360);
 }
@@ -25,6 +25,7 @@ void Radar::SetRotationSpeed(double Speed) { RotationSpeed = Speed; }
 
 void Radar::UpdatePhysics(double DeltaTime) {
     if (Mode == RadarMode::SCANNING) {
+        // Качание антенны в пределах сектора
         CurrentAzimuth += RotationSpeed * SweepDirection * DeltaTime;
         if (CurrentAzimuth >= MaxAzimuth) {
             CurrentAzimuth = MaxAzimuth;
@@ -36,7 +37,24 @@ void Radar::UpdatePhysics(double DeltaTime) {
     }
     else if (Mode == RadarMode::TRACKING) {
         Vector3D DirToTarget = LockedTargetPos - Position;
-        CurrentAzimuth = std::atan2(DirToTarget.Y, DirToTarget.X);
+        double TargetAzimuth = std::atan2(DirToTarget.Y, DirToTarget.X);
+        double Distance = DirToTarget.Length();
+
+        // Приводим угол цели к диапазону нашего сектора (нормализация углов)
+        while (TargetAzimuth < MinAzimuth - 3.14159) TargetAzimuth += 2 * 3.14159;
+        while (TargetAzimuth > MaxAzimuth + 3.14159) TargetAzimuth -= 2 * 3.14159;
+
+        // ИСПРАВЛЕНИЕ: Если цель вылетела за механические пределы радара или слишком далеко
+        if (TargetAzimuth < MinAzimuth || TargetAzimuth > MaxAzimuth || Distance > MaxRange) {
+            // Сбрасываем захват (цель "ушла" из зоны обзора)
+            Mode = RadarMode::SCANNING;
+            TrackLossCounter = 0;
+            BeamWidth = 0.15;
+            SmoothedVelocity = 0.0;
+        } else {
+            // Продолжаем вести цель
+            CurrentAzimuth = TargetAzimuth;
+        }
     }
 }
 
@@ -67,9 +85,10 @@ std::vector<RadarTrack> Radar::ProcessEchoesAndDetect() {
             double DopplerShift = Echo.Frequency - CarrierFrequency;
             double CalculatedVelocity = -(DopplerShift / CarrierFrequency) * (C / 2.0);
 
-            // ИЗМЕНЕНИЕ 1: Увеличиваем размер Слепой Зоны Доплера до 30 м/с!
+            // MTI Фильтр (СДЦ): Игнорируем всё, чья радиальная скорость меньше 30 м/с!
             if (std::abs(CalculatedVelocity) > 30.0) {
 
+                // Кластеризация эхо-сигналов (Слияние точек)
                 bool Merged = false;
                 for (auto& Track : DetectedTargets) {
                     if ((Track.Position - Echo.Position).Length() < 400.0) {
@@ -81,9 +100,16 @@ std::vector<RadarTrack> Radar::ProcessEchoesAndDetect() {
                 }
 
                 if (!Merged) {
+                    // EMA Сглаживание скорости для стабильного вывода на дисплей
+                    if (SmoothedVelocity == 0.0) {
+                        SmoothedVelocity = CalculatedVelocity;
+                    } else {
+                        SmoothedVelocity = SmoothedVelocity * 0.85 + CalculatedVelocity * 0.15;
+                    }
+
                     RadarTrack Track;
                     Track.Position = Echo.Position;
-                    Track.RadialVelocity = CalculatedVelocity;
+                    Track.RadialVelocity = SmoothedVelocity;
                     DetectedTargets.push_back(Track);
                 }
 
@@ -94,6 +120,7 @@ std::vector<RadarTrack> Radar::ProcessEchoesAndDetect() {
     }
     ReceivedEchoes.clear();
 
+    // Конечный автомат радара
     if (TargetFoundThisFrame) {
         Mode = RadarMode::TRACKING;
         TrackLossCounter = 0;
@@ -102,14 +129,15 @@ std::vector<RadarTrack> Radar::ProcessEchoesAndDetect() {
         if (Mode == RadarMode::TRACKING) {
             TrackLossCounter++;
 
-            // ИЗМЕНЕНИЕ 2: Сокращаем память радара до 15 кадров (0.25 секунды).
-            // Если ракета пропадает из Доплера, радар мгновенно её теряет!
+            // Если цель исчезла (спряталась за гору или в слепую зону) на 0.25 сек
             if (TrackLossCounter > 15) {
                 Mode = RadarMode::SCANNING;
                 BeamWidth = 0.15;
+                SmoothedVelocity = 0.0;
             }
         }
     }
+
     LastTracks = DetectedTargets;
     return DetectedTargets;
 }

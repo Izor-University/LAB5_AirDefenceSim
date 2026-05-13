@@ -2,7 +2,7 @@
 #include <vector>
 #include <memory>
 #include <optional>
-#include <algorithm> // Для std::remove_if
+#include <algorithm>
 
 #include "../physics/IPhysicalObject.hpp"
 #include "../entities/Radar.hpp"
@@ -19,6 +19,15 @@ struct NearestHit {
     HitRecord Record;
 };
 
+// ДОБАВЛЕНО: Объединенный трек Командного Пункта (Data Fusion)
+struct FusedTrack {
+    int Id;                 // Стабильный номер цели
+    Vector3D Position;      // Усредненная позиция
+    double DangerVelocity;  // Максимальная радиальная скорость
+    int SensorsTracking;    // Сколько радаров видят цель прямо сейчас
+    int TimeSinceUpdate;    // Таймер потери
+};
+
 class SimulationWorld {
 private:
     std::vector<std::shared_ptr<IPhysicalObject>> SpaceObjects;
@@ -26,7 +35,10 @@ private:
     int MaxBounces;
 
     std::vector<RaySegment> DebugRays;
-    std::vector<RadarTrack> NetworkTracks;
+
+    // ДОБАВЛЕНО: Хранилище стабильных треков и генератор ID
+    std::vector<FusedTrack> ActiveTracks;
+    int NextTrackId;
 
     std::optional<NearestHit> FindNearestIntersection(const ComplexWave& Wave) const;
 
@@ -38,9 +50,10 @@ public:
 
     const std::vector<RaySegment>& GetDebugRays() const { return DebugRays; }
     void ClearDebugRays() { DebugRays.clear(); }
-    const std::vector<RadarTrack>& GetTracks() const { return NetworkTracks; }
 
-    // ДОБАВЛЕНО: Метод удаления всех ракет
+    // ИЗМЕНЕНО: Возвращает объединенные треки
+    const std::vector<FusedTrack>& GetTracks() const { return ActiveTracks; }
+
     void ClearTargets();
 
     void UpdatePhysics(double DeltaTime);

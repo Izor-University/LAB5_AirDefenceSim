@@ -1,7 +1,7 @@
 #include "../../include/systems/SimulationWorld.hpp"
 #include "../../include/physics/WaveEngine.hpp"
 
-SimulationWorld::SimulationWorld(int MaxBounces) : MaxBounces(MaxBounces) {}
+SimulationWorld::SimulationWorld(int MaxBounces) : MaxBounces(MaxBounces), NextTrackId(1) {}
 
 void SimulationWorld::AddObject(std::shared_ptr<IPhysicalObject> Obj) { SpaceObjects.push_back(Obj); }
 void SimulationWorld::AddRadar(std::shared_ptr<Radar> Rdr) { Radars.push_back(Rdr); }
@@ -19,6 +19,9 @@ void SimulationWorld::ClearTargets() {
             ++it;
         }
     }
+    // ИСПРАВЛЕНИЕ: Полностью стираем память Командного Центра при удалении
+    ActiveTracks.clear();
+    DebugRays.clear();
 }
 
 std::optional<NearestHit> SimulationWorld::FindNearestIntersection(const ComplexWave& Wave) const {
@@ -36,7 +39,11 @@ std::optional<NearestHit> SimulationWorld::FindNearestIntersection(const Complex
 
 void SimulationWorld::ProcessRadarNetwork(const std::vector<Vector3D>& /*ScanDirections*/) {
     DebugRays.clear();
-    std::vector<RadarTrack> GlobalTracks;
+
+    for (auto& Track : ActiveTracks) {
+        Track.TimeSinceUpdate++;
+        Track.SensorsTracking = 0;
+    }
 
     for (const auto& CurrentRadar : Radars) {
         auto ActiveWaves = CurrentRadar->GenerateScanRays(60);
@@ -58,26 +65,22 @@ void SimulationWorld::ProcessRadarNetwork(const std::vector<Vector3D>& /*ScanDir
 
                 try {
                     ComplexWave ReflectedWave = WaveEngine::CalculateReflection(CurrentWave, Nearest->Record, *Nearest->Object);
-
                     if (Nearest->Object->GetName() != "Ground") {
                         Vector3D DirToRadar = (CurrentRadar->GetPosition() - ReflectedWave.Position).Normalize();
-
-                        // ЧЕСТНАЯ ФИЗИКА: Пересчитываем Доплеровский сдвиг для прямого пути "Цель -> Радар"
                         Vector3D Velocity = Nearest->Object->GetVelocity();
-                        double V_in = Velocity.DotProduct(CurrentWave.Direction); // Скорость сближения
-                        double V_out = Velocity.DotProduct(DirToRadar);           // Скорость возврата
+                        double V_in = Velocity.DotProduct(CurrentWave.Direction);
+                        double V_out = Velocity.DotProduct(DirToRadar);
                         double TrueDopplerShift = 1.0 - ((V_in - V_out) / WaveEngine::SpeedOfLight);
 
                         ComplexWave EchoWave = ReflectedWave;
                         EchoWave.Direction = DirToRadar;
-                        EchoWave.Frequency = CurrentWave.Frequency * TrueDopplerShift; // Настоящая частота возврата!
+                        EchoWave.Frequency = CurrentWave.Frequency * TrueDopplerShift;
 
                         auto BlockCheck = FindNearestIntersection(EchoWave);
                         if (!BlockCheck.has_value() || BlockCheck->Distance >= (CurrentRadar->GetPosition() - EchoWave.Position).Length()) {
                             SuccessfulEchoes.push_back(EchoWave);
                         }
                     }
-
                     CurrentWave = ReflectedWave;
                     BounceCount++;
                 } catch (const PhysicsException& e) { break; }
@@ -87,7 +90,32 @@ void SimulationWorld::ProcessRadarNetwork(const std::vector<Vector3D>& /*ScanDir
         for (const auto& Echo : SuccessfulEchoes) CurrentRadar->ReceiveEcho(Echo);
 
         auto LocalTracks = CurrentRadar->ProcessEchoesAndDetect();
-        GlobalTracks.insert(GlobalTracks.end(), LocalTracks.begin(), LocalTracks.end());
+
+        for (const auto& LT : LocalTracks) {
+            bool Matched = false;
+            for (auto& FT : ActiveTracks) {
+                if ((FT.Position - LT.Position).Length() < 600.0) {
+
+                    // ИСПРАВЛЕНИЕ: Мгновенная привязка рамки к цели (убирает отставание фантома!)
+                    FT.Position = LT.Position;
+                    FT.DangerVelocity = std::max(FT.DangerVelocity, std::abs(LT.RadialVelocity));
+                    FT.SensorsTracking++;
+                    FT.TimeSinceUpdate = 0;
+                    Matched = true;
+                    break;
+                }
+            }
+            if (!Matched) {
+                ActiveTracks.push_back({NextTrackId++, LT.Position, std::abs(LT.RadialVelocity), 1, 0});
+            }
+        }
     }
-    NetworkTracks = GlobalTracks;
+
+    // ИСПРАВЛЕНИЕ: Уменьшаем время "забывания" до 60 кадров (1 секунда).
+    // Зависшие в воздухе фантомы будут исчезать очень быстро.
+    ActiveTracks.erase(
+        std::remove_if(ActiveTracks.begin(), ActiveTracks.end(),[](const FusedTrack& t) { return t.TimeSinceUpdate > 60; }
+        ),
+        ActiveTracks.end()
+    );
 }
